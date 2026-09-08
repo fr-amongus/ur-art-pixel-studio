@@ -8,6 +8,12 @@ const palette = [
   '#ffc857', '#d6e84f', '#58d68d', '#42c6d6', '#5c8df6', '#a66cff',
 ]
 const brushSizes = [1, 2, 4, 8]
+const canvasPresets = [
+  { label: '2 × 2', width: 2, height: 2 },
+  { label: '256 × 256', width: 256, height: 256 },
+  { label: '512 × 512', width: 512, height: 512 },
+  { label: '1152 × 1000', width: 1152, height: 1000 },
+]
 
 type Point = { x: number; y: number }
 
@@ -28,6 +34,8 @@ function UrArtStudio() {
   const boardRef = useRef<HTMLDivElement>(null)
   const [color, setColor] = useState('#17151e')
   const [size, setSize] = useState(4)
+  const [canvasWidth, setCanvasWidth] = useState(1152)
+  const [canvasHeight, setCanvasHeight] = useState(1000)
   const [erase, setErase] = useState(false)
   const [strokes, setStrokes] = useState<Stroke[]>([])
   const [history, setHistory] = useState<Stroke[][]>([])
@@ -142,6 +150,30 @@ function UrArtStudio() {
     setStatus(`${link.download} downloaded`)
   }
 
+  const resizeCanvas = (nextWidth: number, nextHeight: number) => {
+    const width = Math.max(2, Math.min(4096, Math.round(nextWidth)))
+    const height = Math.max(2, Math.min(4096, Math.round(nextHeight)))
+    const scaleX = width / canvasWidth
+    const scaleY = height / canvasHeight
+    const nextStrokes = strokes.map((stroke) => ({
+      ...stroke,
+      size: Math.max(1, stroke.size * Math.min(scaleX, scaleY)),
+      points: stroke.points.map((point) => ({ x: point.x * scaleX, y: point.y * scaleY })),
+    }))
+    const canvas = canvasRef.current
+    if (canvas) {
+      canvas.width = width
+      canvas.height = height
+    }
+    setCanvasWidth(width)
+    setCanvasHeight(height)
+    setStrokes(nextStrokes)
+    setHistory([])
+    setRedoStack([])
+    redraw(nextStrokes)
+    setStatus(`Canvas resized to ${width} × ${height} px`)
+  }
+
   return (
     <main className="min-h-dvh bg-background text-foreground selection:bg-primary/30">
       <header className="border-b border-border/70 bg-background/80 backdrop-blur-xl">
@@ -183,7 +215,17 @@ function UrArtStudio() {
             </div>
             <div className="mt-3 flex justify-between font-mono text-[10px] uppercase tracking-wider text-muted-foreground"><span>1px</span><span>pixel size: {size}px</span><span>8px</span></div>
           </ToolPanel>
-          <ToolPanel title="Actions" eyebrow="03 / history">
+          <ToolPanel title="Canvas size" eyebrow="03 / dimensions">
+            <div className="grid grid-cols-2 gap-2">
+              <label className="space-y-1"><span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Width</span><input type="number" min={2} max={4096} value={canvasWidth} onChange={(event) => resizeCanvas(Number(event.target.value) || 2, canvasHeight)} className="w-full rounded-lg border border-border bg-secondary/60 px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20" /></label>
+              <label className="space-y-1"><span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Height</span><input type="number" min={2} max={4096} value={canvasHeight} onChange={(event) => resizeCanvas(canvasWidth, Number(event.target.value) || 2)} className="w-full rounded-lg border border-border bg-secondary/60 px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20" /></label>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-1.5">
+              {canvasPresets.map((preset) => <button key={preset.label} onClick={() => resizeCanvas(preset.width, preset.height)} className={`rounded-md border px-1.5 py-1.5 font-mono text-[9px] transition hover:border-primary/60 hover:bg-primary/10 ${canvasWidth === preset.width && canvasHeight === preset.height ? 'border-primary/70 bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}>{preset.label}</button>)}
+            </div>
+            <p className="mt-2 font-mono text-[9px] leading-relaxed text-muted-foreground">Minimum 2 × 2 px · maximum 4096 × 4096 px</p>
+          </ToolPanel>
+          <ToolPanel title="Actions" eyebrow="04 / history">
             <div className="grid grid-cols-2 gap-2">
               <button onClick={undo} disabled={!history.length} className="action-button"><Undo2 className="size-4" />Undo</button>
               <button onClick={redo} disabled={!redoStack.length} className="action-button"><Redo2 className="size-4" />Redo</button>
@@ -198,20 +240,20 @@ function UrArtStudio() {
               <span className="size-1.5 rounded-full bg-primary" /> untitled canvas
             </div>
             <div className="canvas-frame aspect-square w-full overflow-hidden rounded-xl border border-border/80 bg-[#f7f3ff] sm:aspect-[1.2/1] lg:aspect-[1.15/1]">
-              <canvas ref={canvasRef} width={1152} height={1000} className="size-full touch-none cursor-crosshair" onPointerDown={startDrawing} onPointerMove={draw} onPointerUp={finishDrawing} onPointerCancel={finishDrawing} />
+              <canvas ref={canvasRef} width={canvasWidth} height={canvasHeight} className="size-full touch-none cursor-crosshair" onPointerDown={startDrawing} onPointerMove={draw} onPointerUp={finishDrawing} onPointerCancel={finishDrawing} />
             </div>
-            <div className="flex items-center justify-between px-2 pt-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground"><span>1152 × 1000 px</span><span>pressure ready · {erase ? 'erase mode' : 'draw mode'}</span></div>
+            <div className="flex items-center justify-between px-2 pt-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground"><span>{canvasWidth} × {canvasHeight} px</span><span>pressure ready · {erase ? 'erase mode' : 'draw mode'}</span></div>
           </div>
         </section>
 
         <aside className="order-3 space-y-4">
-          <ToolPanel title="Palette" eyebrow="04 / color">
+          <ToolPanel title="Palette" eyebrow="05 / color">
             <div className="grid grid-cols-6 gap-2">
               {palette.map((swatch) => <button key={swatch} aria-label={`Choose ${swatch}`} onClick={() => { setColor(swatch); setErase(false) }} className={`palette-swatch ${color === swatch && !erase ? 'palette-swatch-active' : ''}`} style={{ backgroundColor: swatch }} />)}
             </div>
             <div className="mt-4 flex items-center gap-3 rounded-lg border border-border bg-secondary/50 px-3 py-2"><span className="size-7 rounded-md border border-border" style={{ backgroundColor: erase ? '#f7f3ff' : color }} /><div className="min-w-0"><p className="text-xs font-medium">{erase ? 'Eraser' : 'Active color'}</p><p className="font-mono text-[10px] uppercase text-muted-foreground">{erase ? 'transparent' : color}</p></div></div>
           </ToolPanel>
-          <ToolPanel title="Export" eyebrow="05 / save">
+          <ToolPanel title="Export" eyebrow="06 / save">
             <label className="mb-2 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground" htmlFor="export-name">File name</label>
             <input id="export-name" value={exportName} onChange={(event) => setExportName(event.target.value)} className="w-full rounded-lg border border-border bg-secondary/60 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20" placeholder="my-drawing" />
             <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
