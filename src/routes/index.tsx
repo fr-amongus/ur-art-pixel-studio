@@ -26,7 +26,7 @@ export const Route = createFileRoute('/')({
 function UrArtStudio() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const boardRef = useRef<HTMLDivElement>(null)
-  const [color, setColor] = useState('#f7f3ff')
+  const [color, setColor] = useState('#17151e')
   const [size, setSize] = useState(4)
   const [erase, setErase] = useState(false)
   const [strokes, setStrokes] = useState<Stroke[]>([])
@@ -34,6 +34,8 @@ function UrArtStudio() {
   const [redoStack, setRedoStack] = useState<Stroke[][]>([])
   const [drawing, setDrawing] = useState(false)
   const [status, setStatus] = useState('Canvas ready')
+  const [exportName, setExportName] = useState('ur-art')
+  const [exportFormat, setExportFormat] = useState<'png' | 'jpeg' | 'webp'>('png')
 
   const getPoint = (event: ReactPointerEvent<HTMLCanvasElement>): Point => {
     const canvas = canvasRef.current!
@@ -131,11 +133,13 @@ function UrArtStudio() {
   const download = () => {
     const canvas = canvasRef.current
     if (!canvas) return
+    const safeName = exportName.trim().replace(/[^a-zA-Z0-9-_]/g, '-') || 'ur-art'
+    const mimeType = `image/${exportFormat}`
     const link = document.createElement('a')
-    link.download = 'ur-art.png'
-    link.href = canvas.toDataURL('image/png')
+    link.download = `${safeName}.${exportFormat === 'jpeg' ? 'jpg' : exportFormat}`
+    link.href = canvas.toDataURL(mimeType, 0.95)
     link.click()
-    setStatus('PNG downloaded')
+    setStatus(`${link.download} downloaded`)
   }
 
   return (
@@ -157,8 +161,8 @@ function UrArtStudio() {
           </div>
           <button onClick={download} className="group inline-flex items-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-3.5 py-2 text-sm font-medium text-primary transition-all hover:bg-primary hover:text-primary-foreground active:scale-95">
             <Download className="size-4 transition-transform group-hover:-translate-y-0.5" />
-            <span className="hidden sm:inline">Download PNG</span>
-            <span className="sm:hidden">PNG</span>
+            <span className="hidden sm:inline">Save image</span>
+            <span className="sm:hidden">Save</span>
           </button>
         </div>
       </header>
@@ -169,7 +173,7 @@ function UrArtStudio() {
             <button onClick={() => setErase(false)} className={`tool-button ${!erase ? 'tool-button-active' : ''}`}><MousePointer2 className="size-4" /><span>Draw</span><kbd>B</kbd></button>
             <button onClick={() => setErase(true)} className={`tool-button ${erase ? 'tool-button-active' : ''}`}><Eraser className="size-4" /><span>Eraser</span><kbd>E</kbd></button>
           </ToolPanel>
-          <ToolPanel title="Brush size" eyebrow="02 / weight">
+          <ToolPanel title="Pixel size" eyebrow="02 / resolution">
             <div className="grid grid-cols-4 gap-2">
               {brushSizes.map((brush) => (
                 <button key={brush} onClick={() => setSize(brush)} aria-label={`${brush} pixel brush`} className={`grid aspect-square place-items-center rounded-lg border text-xs font-medium transition-all hover:border-primary/70 hover:bg-primary/10 active:scale-95 ${size === brush ? 'border-primary bg-primary text-primary-foreground shadow-[0_0_18px_color-mix(in_oklch,var(--primary)_30%,transparent)]' : 'border-border bg-secondary/50 text-muted-foreground'}`}>
@@ -177,7 +181,7 @@ function UrArtStudio() {
                 </button>
               ))}
             </div>
-            <div className="mt-3 flex justify-between font-mono text-[10px] uppercase tracking-wider text-muted-foreground"><span>fine</span><span>{size}px</span><span>bold</span></div>
+            <div className="mt-3 flex justify-between font-mono text-[10px] uppercase tracking-wider text-muted-foreground"><span>1px</span><span>pixel size: {size}px</span><span>8px</span></div>
           </ToolPanel>
           <ToolPanel title="Actions" eyebrow="03 / history">
             <div className="grid grid-cols-2 gap-2">
@@ -206,6 +210,18 @@ function UrArtStudio() {
               {palette.map((swatch) => <button key={swatch} aria-label={`Choose ${swatch}`} onClick={() => { setColor(swatch); setErase(false) }} className={`palette-swatch ${color === swatch && !erase ? 'palette-swatch-active' : ''}`} style={{ backgroundColor: swatch }} />)}
             </div>
             <div className="mt-4 flex items-center gap-3 rounded-lg border border-border bg-secondary/50 px-3 py-2"><span className="size-7 rounded-md border border-border" style={{ backgroundColor: erase ? '#f7f3ff' : color }} /><div className="min-w-0"><p className="text-xs font-medium">{erase ? 'Eraser' : 'Active color'}</p><p className="font-mono text-[10px] uppercase text-muted-foreground">{erase ? 'transparent' : color}</p></div></div>
+          </ToolPanel>
+          <ToolPanel title="Export" eyebrow="05 / save">
+            <label className="mb-2 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground" htmlFor="export-name">File name</label>
+            <input id="export-name" value={exportName} onChange={(event) => setExportName(event.target.value)} className="w-full rounded-lg border border-border bg-secondary/60 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20" placeholder="my-drawing" />
+            <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+              <select aria-label="Image format" value={exportFormat} onChange={(event) => setExportFormat(event.target.value as 'png' | 'jpeg' | 'webp')} className="min-w-0 rounded-lg border border-border bg-secondary/60 px-3 py-2 text-xs font-medium text-foreground outline-none transition focus:border-primary">
+                <option value="png">PNG · transparent-ready</option>
+                <option value="jpeg">JPG · lightweight</option>
+                <option value="webp">WEBP · modern</option>
+              </select>
+              <button onClick={download} aria-label="Save drawing" className="grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground transition hover:brightness-110 active:scale-95"><Download className="size-4" /></button>
+            </div>
           </ToolPanel>
           <div className="rounded-2xl border border-primary/20 bg-primary/10 p-4"><p className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">small worlds, big mood</p><p className="mt-2 font-serif text-lg leading-snug text-foreground">Make something tiny that feels like yours.</p><p className="mt-3 text-xs leading-relaxed text-muted-foreground">Draw with a mouse, finger, or stylus. Every mark stays intentionally pixel-sharp.</p></div>
           <div className="hidden items-center justify-between px-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground lg:flex"><span>ur-art / local</span><span>v1.0</span></div>
