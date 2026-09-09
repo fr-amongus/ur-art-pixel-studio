@@ -155,10 +155,15 @@ function UrArtStudio() {
     const height = Math.max(2, Math.min(4096, Math.round(nextHeight)))
     const scaleX = width / canvasWidth
     const scaleY = height / canvasHeight
+    const maxBrushSize = Math.max(1, Math.min(8, width, height))
+    const nextSize = Math.min(size, maxBrushSize)
     const nextStrokes = strokes.map((stroke) => ({
       ...stroke,
-      size: Math.max(1, stroke.size * Math.min(scaleX, scaleY)),
-      points: stroke.points.map((point) => ({ x: point.x * scaleX, y: point.y * scaleY })),
+      size: Math.min(maxBrushSize, Math.max(1, stroke.size * Math.min(scaleX, scaleY))),
+      points: stroke.points.map((point) => ({
+        x: Math.max(0, Math.min(width - 1, point.x * scaleX)),
+        y: Math.max(0, Math.min(height - 1, point.y * scaleY)),
+      })),
     }))
     const canvas = canvasRef.current
     if (canvas) {
@@ -167,6 +172,7 @@ function UrArtStudio() {
     }
     setCanvasWidth(width)
     setCanvasHeight(height)
+    setSize(nextSize)
     setStrokes(nextStrokes)
     setHistory([])
     setRedoStack([])
