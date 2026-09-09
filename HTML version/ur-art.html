@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ur Art · HTML Pixel Studio</title>
+  <meta name="description" content="Ur Art, un atelier pixel-art tactile en HTML." />
+  <style>
+    :root { color-scheme: dark; --bg:#09080f; --panel:#151321; --panel-2:#1e1a2d; --line:#3b3154; --text:#f2edff; --muted:#9991ad; --primary:#c88cff; --primary-dark:#241835; --danger:#f06c88; --paper:#f7f3ff; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:radial-gradient(circle at 50% -20%,#231737 0,#09080f 48%); color:var(--text); font:14px/1.4 Arial,sans-serif; }
+    header { border-bottom:1px solid rgba(255,255,255,.1); background:rgba(9,8,15,.8); backdrop-filter:blur(16px); }
+    .topbar { max-width:1440px; margin:auto; padding:16px 28px; display:flex; align-items:center; justify-content:space-between; gap:18px; }
+    .brand { display:flex; align-items:center; gap:11px; }
+    .logo { display:grid; place-items:center; width:38px; height:38px; border-radius:12px; background:var(--primary); color:#18101e; font:bold 24px Georgia; box-shadow:0 0 26px rgba(200,140,255,.35); }
+    h1,h2,p { margin:0; } h1 { font:700 21px Georgia,serif; } h2 { font:700 16px Georgia,serif; }
+    .eyebrow,.meta { color:var(--muted); font:10px monospace; letter-spacing:.16em; text-transform:uppercase; }
+    .status { color:var(--muted); font-size:12px; } .status::before { content:''; display:inline-block; width:7px; height:7px; margin-right:8px; border-radius:50%; background:#ffd447; box-shadow:0 0 10px #ffd447; }
+    button,input,select { font:inherit; } button { cursor:pointer; }
+    .save-top,.primary-button { border:1px solid rgba(200,140,255,.6); border-radius:11px; padding:10px 14px; background:rgba(200,140,255,.12); color:var(--primary); font-weight:700; transition:.15s; }
+    button:hover:not(:disabled) { filter:brightness(1.16); transform:translateY(-1px); } button:active:not(:disabled) { transform:scale(.97); } button:disabled { cursor:not-allowed; opacity:.35; }
+    .layout { display:grid; grid-template-columns:240px minmax(0,1fr) 240px; gap:24px; max-width:1440px; margin:auto; padding:32px 28px; }
+    .stack { display:flex; flex-direction:column; gap:16px; } .panel { padding:16px; border:1px solid var(--line); border-radius:16px; background:rgba(21,19,33,.88); box-shadow:0 18px 42px rgba(0,0,0,.25); }
+    .panel-head { display:flex; align-items:end; justify-content:space-between; gap:12px; margin-bottom:13px; }
+    .tool { display:flex; align-items:center; gap:10px; width:100%; padding:10px 12px; border:1px solid transparent; border-radius:9px; background:transparent; color:var(--muted); text-align:left; } .tool + .tool { margin-top:3px; } .tool.active { border-color:rgba(200,140,255,.6); background:var(--primary-dark); color:var(--primary); }
+    kbd { margin-left:auto; padding:2px 6px; border-radius:4px; background:var(--panel-2); color:var(--muted); font:10px monospace; }
+    .brushes,.presets,.colors { display:grid; gap:8px; } .brushes { grid-template-columns:repeat(4,1fr); } .presets { grid-template-columns:repeat(2,1fr); } .colors { grid-template-columns:repeat(6,1fr); }
+    .brush,.preset,.swatch { border:1px solid var(--line); border-radius:8px; background:var(--panel-2); color:var(--muted); transition:.15s; } .brush { aspect-ratio:1; display:grid; place-items:center; } .brush.active,.preset.active { border-color:var(--primary); background:var(--primary-dark); color:var(--primary); } .dot { display:block; border-radius:50%; background:currentColor; }
+    .swatch { aspect-ratio:1; padding:0; box-shadow:inset 0 0 0 1px rgba(0,0,0,.25); } .swatch.active { outline:2px solid var(--text); outline-offset:2px; }
+    .inputs { display:grid; grid-template-columns:1fr 1fr; gap:8px; } label { display:grid; gap:5px; color:var(--muted); font:10px monospace; text-transform:uppercase; letter-spacing:.08em; } input,select { width:100%; border:1px solid var(--line); border-radius:8px; padding:9px; outline:none; background:var(--panel-2); color:var(--text); } input:focus,select:focus { border-color:var(--primary); }
+    .canvas-card { min-width:0; padding:12px; border:1px solid var(--line); border-radius:18px; background:var(--panel); box-shadow:0 24px 70px rgba(0,0,0,.4); }
+    .canvas-wrap { position:relative; width:100%; overflow:hidden; border:1px solid #d9d1e8; border-radius:13px; background:var(--paper); aspect-ratio:1.15/1; }
+    canvas { display:block; width:100%; height:100%; cursor:crosshair; touch-action:none; image-rendering:pixelated; }
+    .canvas-label { position:absolute; left:12px; top:12px; padding:6px 11px; border:1px solid rgba(255,255,255,.22); border-radius:999px; background:rgba(19,16,29,.75); color:var(--muted); font:10px monospace; letter-spacing:.12em; text-transform:uppercase; pointer-events:none; }
+    .canvas-footer { display:flex; justify-content:space-between; gap:10px; padding:11px 8px 0; color:var(--muted); font:10px monospace; text-transform:uppercase; letter-spacing:.08em; }
+    .actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; } .action { padding:10px 5px; border:1px solid var(--line); border-radius:8px; background:var(--panel-2); color:var(--muted); } .danger { width:100%; margin-top:8px; padding:10px; border:1px solid rgba(240,108,136,.4); border-radius:8px; background:rgba(240,108,136,.1); color:var(--danger); }
+    .primary-button { width:100%; margin-top:8px; background:var(--primary); color:#1b1125; }
+    .tip { padding:16px; border:1px solid rgba(200,140,255,.25); border-radius:16px; background:rgba(200,140,255,.1); } .tip p + p { margin-top:8px; } .tip .title { font:18px Georgia,serif; }
+    @media (max-width:980px) { .layout { grid-template-columns:1fr; } .left { order:2; } .center { order:1; } .right { order:3; } .stack { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; } .tip { grid-column:span 2; } }
+    @media (max-width:600px) { .topbar { padding:13px 16px; } .status { display:none; } .layout { padding:18px 14px; gap:16px; } .stack { display:flex; } .canvas-footer { font-size:9px; } .save-top { padding:9px 11px; } }
+  </style>
+</head>
+<body>
+  <header><div class="topbar"><div class="brand"><div class="logo">u</div><div><h1>Ur Art</h1><p class="eyebrow">pixel studio / HTML version</p></div></div><div class="status" id="status">Canvas ready</div><button class="save-top" id="saveTop">Save image</button></div></header>
+  <main class="layout">
+    <aside class="stack left">
+      <section class="panel"><div class="panel-head"><h2>Tools</h2><span class="eyebrow">01 / mark</span></div><button class="tool active" id="drawTool">✦ <span>Draw</span><kbd>B</kbd></button><button class="tool" id="eraseTool">⌫ <span>Eraser</span><kbd>E</kbd></button></section>
+      <section class="panel"><div class="panel-head"><h2>Pixel size</h2><span class="eyebrow">02 / brush</span></div><div class="brushes" id="brushes"></div><div class="canvas-footer"><span>1px</span><span id="brushLabel">4px</span><span>8px</span></div></section>
+      <section class="panel"><div class="panel-head"><h2>Canvas size</h2><span class="eyebrow">03 / dimensions</span></div><div class="inputs"><label>Width<input id="width" type="number" min="2" max="4096" value="1152"></label><label>Height<input id="height" type="number" min="2" max="4096" value="1000"></label></div><div class="presets" id="presets" style="margin-top:12px"></div><p class="meta" style="margin-top:10px;line-height:1.5">Minimum 2 × 2 px · maximum 4096 × 4096 px</p></section>
+      <section class="panel"><div class="panel-head"><h2>Actions</h2><span class="eyebrow">04 / history</span></div><div class="actions"><button class="action" id="undo" disabled>↶ Undo</button><button class="action" id="redo" disabled>↷ Redo</button></div><button class="danger" id="clear">♲ Clear all</button></section>
+    </aside>
+    <section class="center"><div class="canvas-card"><div class="canvas-wrap"><div class="canvas-label">● untitled canvas</div><canvas id="canvas" width="1152" height="1000"></canvas></div><div class="canvas-footer"><span id="dimensions">1152 × 1000 px</span><span id="mode">pressure ready · draw mode</span></div></div></section>
+    <aside class="stack right">
+      <section class="panel"><div class="panel-head"><h2>Palette</h2><span class="eyebrow">05 / color</span></div><div class="colors" id="colors"></div><div style="display:flex;align-items:center;gap:10px;margin-top:15px;padding:9px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2)"><span id="activeColor" style="width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:#17151e"></span><div><p id="colorName" style="font-size:12px">Active color</p><p class="meta" id="colorHex">#17151E</p></div></div></section>
+      <section class="panel"><div class="panel-head"><h2>Export</h2><span class="eyebrow">06 / save</span></div><label>File name<input id="fileName" value="ur-art" placeholder="my-drawing"></label><label style="margin-top:10px">Format<select id="format"><option value="png">PNG</option><option value="jpeg">JPG</option><option value="webp">WEBP</option></select></label><button class="primary-button" id="save">↓ Save image</button></section>
+      <section class="tip"><p class="eyebrow">small worlds, big mood</p><p class="title">Make something tiny that feels like yours.</p><p class="meta" style="line-height:1.6;text-transform:none;letter-spacing:0">Draw with a mouse, finger, or stylus. Every mark stays pixel-sharp.</p></section>
+    </aside>
+  </main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const canvas = $('canvas'), ctx = canvas.getContext('2d');
+  const paper = '#f7f3ff', palette = ['#f7f3ff','#17151e','#b8b3c8','#726b83','#f04f7a','#ff7b54','#ffc857','#d6e84f','#58d68d','#42c6d6','#5c8df6','#a66cff'];
+  const sizes = [1,2,4,8], presets = [[2,2],[256,256],[512,512],[1152,1000]];
+  let color = '#17151e', brush = 4, erase = false, drawing = false, strokes = [], history = [], redo = [], oldW = 1152, oldH = 1000;
+  function paint(list) { ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle=paper; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.imageSmoothingEnabled=false; list.forEach(s => { if(!s.points.length)return; ctx.save(); ctx.globalCompositeOperation=s.erase?'destination-out':'source-over'; ctx.strokeStyle=s.color; ctx.lineWidth=s.size; ctx.lineCap='square'; ctx.lineJoin='miter'; ctx.beginPath(); ctx.moveTo(s.points[0].x,s.points[0].y); s.points.slice(1).forEach(p=>ctx.lineTo(p.x,p.y)); ctx.stroke(); ctx.restore(); }); }
+  function refresh() { $('dimensions').textContent=canvas.width+' × '+canvas.height+' px'; $('brushLabel').textContent=brush+'px'; $('mode').textContent='pressure ready · '+(erase?'erase':'draw')+' mode'; $('undo').disabled=!history.length; $('redo').disabled=!redo.length; }
+  function point(e) { const r=canvas.getBoundingClientRect(); return {x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height}; }
+  function start(e) { e.preventDefault(); canvas.setPointerCapture(e.pointerId); drawing=true; history.push(strokes.map(s=>({...s,points:s.points.map(p=>({...p}))}))); redo=[]; strokes.push({points:[point(e)],color,size:brush,erase}); paint(strokes); refresh(); }
+  function move(e) { if(!drawing)return; e.preventDefault(); strokes[strokes.length-1].points.push(point(e)); paint(strokes); }
+  function finish(){ if(!drawing)return; drawing=false; $('status').textContent=erase?'Erased a mark':'Added a mark'; }
+  function resize(w,h) { w=Math.max(2,Math.min(4096,Math.round(Number(w)||2))); h=Math.max(2,Math.min(4096,Math.round(Number(h)||2))); const sx=w/oldW,sy=h/oldH; strokes=strokes.map(s=>({...s,size:Math.max(1,s.size*Math.min(sx,sy)),points:s.points.map(p=>({x:p.x*sx,y:p.y*sy}))})); canvas.width=w;canvas.height=h;oldW=w;oldH=h;history=[];redo=[];paint(strokes);refresh();$('status').textContent='Canvas resized to '+w+' × '+h+' px'; }
+  function exportImage(){const name=($('fileName').value.trim().replace(/[^a-zA-Z0-9-_]/g,'-')||'ur-art'),f=$('format').value,mime='image/'+f,a=document.createElement('a');a.download=name+'.'+(f==='jpeg'?'jpg':f);a.href=canvas.toDataURL(mime,.95);a.click();$('status').textContent=a.download+' downloaded';}
+  sizes.forEach(n=>{const b=document.createElement('button');b.className='brush'+(n===4?' active':'');b.innerHTML='<span class="dot" style="width:'+Math.max(4,n*2)+'px;height:'+Math.max(4,n*2)+'px"></span>';b.onclick=()=>{brush=n;document.querySelectorAll('.brush').forEach(x=>x.classList.remove('active'));b.classList.add('active');refresh()};$('brushes').appendChild(b)});
+  presets.forEach(([w,h])=>{const b=document.createElement('button');b.className='preset';b.textContent=w+' × '+h;b.onclick=()=>resize(w,h);$('presets').appendChild(b)});
+  palette.forEach(c=>{const b=document.createElement('button');b.className='swatch'+(c===color?' active':'');b.style.background=c;b.title=c;b.onclick=()=>{color=c;erase=false;document.querySelectorAll('.swatch').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('activeColor').style.background=c;$('colorHex').textContent=c.toUpperCase();$('colorName').textContent='Active color';refresh()};$('colors').appendChild(b)});
+  $('drawTool').onclick=()=>{erase=false;$('drawTool').classList.add('active');$('eraseTool').classList.remove('active');refresh()}; $('eraseTool').onclick=()=>{erase=true;$('eraseTool').classList.add('active');$('drawTool').classList.remove('active');refresh()};
+  $('width').onchange=()=>resize($('width').value,canvas.height); $('height').onchange=()=>resize(canvas.width,$('height').value);
+  $('undo').onclick=()=>{if(!history.length)return;redo.push(strokes);strokes=history.pop();paint(strokes);refresh();}; $('redo').onclick=()=>{if(!redo.length)return;history.push(strokes);strokes=redo.pop();paint(strokes);refresh()}; $('clear').onclick=()=>{if(!strokes.length)return;history.push(strokes);redo=[];strokes=[];paint(strokes);refresh();$('status').textContent='Canvas cleared'};
+  $('save').onclick=exportImage; $('saveTop').onclick=exportImage; canvas.addEventListener('pointerdown',start);canvas.addEventListener('pointermove',move);canvas.addEventListener('pointerup',finish);canvas.addEventListener('pointercancel',finish); window.addEventListener('keydown',e=>{if(e.target.matches('input,select'))return;if(e.key.toLowerCase()==='b')$('drawTool').click();if(e.key.toLowerCase()==='e')$('eraseTool').click();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();$('undo').click()}}); paint([]);refresh();
+})();
+</script>
+</body>
+</html>
