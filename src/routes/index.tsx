@@ -1,7 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import { Download, Eraser, Trash2, Undo2, Redo2, MousePointer2 } from 'lucide-react'
+import { Download, Eraser, Trash2, Undo2, Redo2, MousePointer2, Globe2, LogIn, RefreshCw } from 'lucide-react'
+import { blink } from '@/blink/client'
+import type { PublicDrawingsRow } from '@/lib/db-types'
 
 const palette = [
   '#f7f3ff', '#17151e', '#b8b3c8', '#726b83', '#f04f7a', '#ff7b54',
@@ -44,6 +46,37 @@ function UrArtStudio() {
   const [status, setStatus] = useState('Canvas ready')
   const [exportName, setExportName] = useState('ur-art')
   const [exportFormat, setExportFormat] = useState<'png' | 'jpeg' | 'webp'>('png')
+  const [user, setUser] = useState<{ id: string } | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [gallery, setGallery] = useState<PublicDrawingsRow[]>([])
+  const [galleryLoading, setGalleryLoading] = useState(true)
+  const [publishing, setPublishing] = useState(false)
+
+  useEffect(() => {
+    const unsubscribe = blink.auth.onAuthStateChanged((state) => {
+      setUser(state.user ? { id: state.user.id } : null)
+      if (!state.isLoading) setAuthLoading(false)
+    })
+    return unsubscribe
+  }, [])
+
+  const drawingsTable = blink.db.table<PublicDrawingsRow>('public_drawings')
+
+  const loadGallery = async () => {
+    setGalleryLoading(true)
+    try {
+      const rows = await drawingsTable.list({ orderBy: { createdAt: 'desc' }, limit: 24 })
+      setGallery(rows)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Unable to load gallery')
+    } finally {
+      setGalleryLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadGallery()
+  }, [])
 
   const getPoint = (event: ReactPointerEvent<HTMLCanvasElement>): Point => {
     const canvas = canvasRef.current!
@@ -150,6 +183,38 @@ function UrArtStudio() {
     setStatus(`${link.download} downloaded`)
   }
 
+  const publishDrawing = async () => {
+    if (authLoading) return
+    if (!user) {
+      blink.auth.login(window.location.href)
+      return
+    }
+    if (!strokes.length) {
+      setStatus('Draw something before publishing')
+      return
+    }
+    setPublishing(true)
+    try {
+      const now = new Date().toISOString()
+      await drawingsTable.create({
+        userId: user.id,
+        title: exportName.trim() || 'Untitled drawing',
+        canvasData: JSON.stringify(strokes),
+        width: canvasWidth,
+        height: canvasHeight,
+        isPublic: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      await loadGallery()
+      setStatus('Published to the public gallery')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Unable to publish drawing')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   const resizeCanvas = (nextWidth: number, nextHeight: number) => {
     const width = Math.max(2, Math.min(4096, Math.round(nextWidth)))
     const height = Math.max(2, Math.min(4096, Math.round(nextHeight)))
@@ -197,6 +262,10 @@ function UrArtStudio() {
             <span className="size-2 rounded-full bg-accent shadow-[0_0_12px_var(--accent)]" />
             <span>{status}</span>
           </div>
+          <button onClick={publishDrawing} disabled={publishing || authLoading} className="group inline-flex items-center gap-2 rounded-xl border border-accent/50 bg-accent/10 px-3.5 py-2 text-sm font-medium text-accent transition-all hover:bg-accent hover:text-accent-foreground active:scale-95 disabled:cursor-not-allowed disabled:opacity-50">
+            {user ? <Globe2 className="size-4" /> : <LogIn className="size-4" />}
+            <span className="hidden sm:inline">{publishing ? 'Publishing…' : user ? 'Publish' : 'Sign in to publish'}</span>
+          </button>
           <button onClick={download} className="group inline-flex items-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-3.5 py-2 text-sm font-medium text-primary transition-all hover:bg-primary hover:text-primary-foreground active:scale-95">
             <Download className="size-4 transition-transform group-hover:-translate-y-0.5" />
             <span className="hidden sm:inline">Save image</span>
@@ -275,10 +344,68 @@ function UrArtStudio() {
           <div className="hidden items-center justify-between px-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground lg:flex"><span>ur-art / local</span><span>v1.0</span></div>
         </aside>
       </div>
+
+      <section className="mx-auto max-w-[1440px] px-5 pb-10 lg:px-10">
+        <div className="mb-4 flex items-end justify-between gap-4">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">public wall / 07</p>
+            <h2 className="mt-1 font-serif text-2xl font-semibold">Community gallery</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Drawings published by the Ur Art community.</p>
+          </div>
+          <button onClick={() => void loadGallery()} disabled={galleryLoading} aria-label="Refresh gallery" className="action-button"><RefreshCw className={`size-4 ${galleryLoading ? 'animate-spin' : ''}`} />Refresh</button>
+        </div>
+        {galleryLoading ? (
+          <div className="rounded-2xl border border-border bg-card/70 p-8 text-center text-sm text-muted-foreground">Loading the gallery…</div>
+        ) : gallery.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-card/50 p-10 text-center"><Globe2 className="mx-auto size-7 text-primary" /><p className="mt-3 font-serif text-lg">The wall is waiting for its first drawing.</p><p className="mt-1 text-sm text-muted-foreground">Create a mark, then publish it for everyone to see.</p></div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {gallery.map((drawing) => (
+              <article key={drawing.id} className="overflow-hidden rounded-2xl border border-border bg-card shadow-md transition hover:-translate-y-1 hover:border-primary/50">
+                <div className="canvas-frame aspect-square bg-[#f7f3ff] p-3"><GalleryPreview drawing={drawing} /></div>
+                <div className="flex items-center justify-between gap-3 p-3"><div className="min-w-0"><h3 className="truncate text-sm font-medium">{drawing.title}</h3><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{drawing.width} × {drawing.height} px</p></div><Globe2 className="size-4 shrink-0 text-primary" /></div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     </main>
   )
 }
 
-function ToolPanel({ title, eyebrow, children }: { title: string; eyebrow: string; children: ReactNode }) {
-  return <section className="rounded-2xl border border-border bg-card/80 p-4 shadow-md"><div className="mb-3 flex items-end justify-between"><h2 className="font-serif text-base font-semibold">{title}</h2><span className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground">{eyebrow}</span></div>{children}</section>
+function GalleryPreview({ drawing }: { drawing: PublicDrawingsRow }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.width = Number(drawing.width)
+    canvas.height = Number(drawing.height)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.fillStyle = '#f7f3ff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    try {
+      const strokes = JSON.parse(drawing.canvasData) as Stroke[]
+      ctx.imageSmoothingEnabled = false
+      for (const stroke of strokes) {
+        if (!stroke.points.length) continue
+        ctx.save()
+        ctx.globalCompositeOperation = stroke.erase ? 'destination-out' : 'source-over'
+        ctx.strokeStyle = stroke.color
+        ctx.lineWidth = stroke.size
+        ctx.lineCap = 'square'
+        ctx.lineJoin = 'miter'
+        ctx.beginPath()
+        ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
+        for (const point of stroke.points.slice(1)) ctx.lineTo(point.x, point.y)
+        ctx.stroke()
+        ctx.restore()
+      }
+    } catch {
+      ctx.fillStyle = '#726b83'
+      ctx.font = '16px sans-serif'
+      ctx.fillText('Preview unavailable', 20, 30)
+    }
+  }, [drawing])
+  return <canvas ref={canvasRef} className="size-full" aria-label={`Preview of ${drawing.title}`} />
 }
