@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { Download, Eraser, Trash2, Undo2, Redo2, MousePointer2, Globe2, LogIn, RefreshCw } from 'lucide-react'
 import { blink } from '@/blink/client'
@@ -62,21 +62,25 @@ function UrArtStudio() {
 
   const drawingsTable = blink.db.table<PublicDrawingsRow>('public_drawings')
 
-  const loadGallery = async () => {
+  const loadGallery = useCallback(async () => {
     setGalleryLoading(true)
     try {
-      const rows = await drawingsTable.list({ orderBy: { createdAt: 'desc' }, limit: 24 })
-      setGallery(rows)
+      const rows = await drawingsTable.list({
+        where: { isPublic: '1' },
+        orderBy: { createdAt: 'desc' },
+        limit: 24,
+      })
+      setGallery(rows.filter((drawing) => drawing.isPublic === true || Number(drawing.isPublic) > 0))
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Unable to load gallery')
     } finally {
       setGalleryLoading(false)
     }
-  }
+  }, [drawingsTable])
 
   useEffect(() => {
     void loadGallery()
-  }, [])
+  }, [loadGallery])
 
   const getPoint = (event: ReactPointerEvent<HTMLCanvasElement>): Point => {
     const canvas = canvasRef.current!
@@ -370,6 +374,18 @@ function UrArtStudio() {
         )}
       </section>
     </main>
+  )
+}
+
+function ToolPanel({ title, eyebrow, children }: { title: string; eyebrow: string; children: ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-border bg-card/80 p-4 shadow-sm">
+      <div className="mb-3 flex items-end justify-between gap-3">
+        <h2 className="font-serif text-base font-semibold">{title}</h2>
+        <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">{eyebrow}</span>
+      </div>
+      {children}
+    </section>
   )
 }
 
