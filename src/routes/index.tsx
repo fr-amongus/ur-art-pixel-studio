@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import { Download, Eraser, Trash2, Undo2, Redo2, MousePointer2, Globe2, LogIn, RefreshCw } from 'lucide-react'
+import { Download, Eraser, Trash2, Undo2, Redo2, MousePointer2, Globe2, LogIn, RefreshCw, PaintBucket, Replace } from 'lucide-react'
 import { blink } from '@/blink/client'
 import type { PublicDrawingsRow } from '@/lib/db-types'
 
@@ -20,6 +20,81 @@ const canvasPresets = [
 type Point = { x: number; y: number }
 
 type Stroke = { points: Point[]; color: string; size: number; erase: boolean }
+type CanvasAction = Stroke | { kind: 'fill'; x: number; y: number; color: string; tolerance: number } | { kind: 'replace'; from: string; to: string | null; tolerance: number }
+
+function parseHex(value: string): [number, number, number] | null {
+  const raw = value.trim().replace(/^#/, '')
+  const full = raw.length === 3 ? [...raw].map((part) => part + part).join('') : raw
+  if (!/^[	a-fA-F0-9]{6}$/.test(full)) return null
+  return [Number.parseInt(full.slice(0, 2), 16), Number.parseInt(full.slice(2, 4), 16), Number.parseInt(full.slice(4, 6), 16)]
+}
+
+function colorChannels(value: string): [number, number, number] {
+  return parseHex(value) ?? [0, 0, 0]
+}
+
+function colorDistanceMatches(data: Uint8ClampedArray, offset: number, target: number[], tolerance: number) {
+  return Math.abs(data[offset] - target[0]) <= tolerance && Math.abs(data[offset + 1] - target[1]) <= tolerance && Math.abs(data[offset + 2] - target[2]) <= tolerance && Math.abs(data[offset + 3] - target[3]) <= tolerance
+}
+
+function applyFill(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, tolerance: number) {
+  const { width, height } = ctx.canvas
+  const total = width * height
+  if (total > 8_000_000) return -1
+  const image = ctx.getImageData(0, 0, width, height)
+  const data = image.data
+  const start = (Math.floor(y) * width + Math.floor(x)) * 4
+  const target = [data[start], data[start + 1], data[start + 2], data[start + 3]]
+  const rgb = parseHex(color)
+  if (!rgb) return 0
+  const replacement = [...rgb, 255]
+  if (target.every((channel, index) => channel === replacement[index])) return 0
+  const visited = new Uint8Array(Math.ceil(total / 8))
+  const queue = new Uint32Array(total)
+  const marked = (pixel: number) => (visited[pixel >> 3] & (1 << (pixel & 7))) !== 0
+  const mark = (pixel: number) => { visited[pixel >> 3] |= 1 << (pixel & 7) }
+  let head = 0
+  let tail = 0
+  const enqueue = (pixel: number) => {
+    const offset = pixel * 4
+    if (marked(pixel) || !colorDistanceMatches(data, offset, target, tolerance)) return
+    mark(pixel)
+    data[offset] = replacement[0]; data[offset + 1] = replacement[1]; data[offset + 2] = replacement[2]; data[offset + 3] = 255
+    queue[tail++] = pixel
+  }
+  enqueue(Math.floor(y) * width + Math.floor(x))
+  while (head < tail) {
+    const pixel = queue[head++]
+    const px = pixel % width
+    if (px > 0) enqueue(pixel - 1)
+    if (px + 1 < width) enqueue(pixel + 1)
+    if (pixel >= width) enqueue(pixel - width)
+    if (pixel + width < total) enqueue(pixel + width)
+  }
+  ctx.putImageData(image, 0, 0)
+  return tail
+}
+
+function applyReplacement(ctx: CanvasRenderingContext2D, from: string, to: string | null, tolerance: number) {
+  const targetRgb = parseHex(from)
+  const replacementRgb = to ? parseHex(to) : null
+  if (!targetRgb || (to && !replacementRgb)) return 0
+  const image = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height)
+  const data = image.data
+  const target = [...targetRgb, 255]
+  let count = 0
+  for (let offset = 0; offset < data.length; offset += 4) {
+    if (!colorDistanceMatches(data, offset, target, tolerance)) continue
+    if (replacementRgb) {
+      data[offset] = replacementRgb[0]; data[offset + 1] = replacementRgb[1]; data[offset + 2] = replacementRgb[2]; data[offset + 3] = 255
+    } else {
+      data[offset] = 0; data[offset + 1] = 0; data[offset + 2] = 0; data[offset + 3] = 0
+    }
+    count++
+  }
+  ctx.putImageData(image, 0, 0)
+  return count
+}
 
 export const Route = createFileRoute('/')({
   head: () => ({
