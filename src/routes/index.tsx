@@ -25,7 +25,7 @@ type CanvasAction = Stroke | { kind: 'fill'; x: number; y: number; color: string
 function parseHex(value: string): [number, number, number] | null {
   const raw = value.trim().replace(/^#/, '')
   const full = raw.length === 3 ? [...raw].map((part) => part + part).join('') : raw
-  if (!/^[	a-fA-F0-9]{6}$/.test(full)) return null
+  if (!/^[a-fA-F0-9]{6}$/.test(full)) return null
   return [Number.parseInt(full.slice(0, 2), 16), Number.parseInt(full.slice(2, 4), 16), Number.parseInt(full.slice(4, 6), 16)]
 }
 
@@ -33,7 +33,11 @@ function colorChannels(value: string): [number, number, number] {
   return parseHex(value) ?? [0, 0, 0]
 }
 
-function colorDistanceMatches(data: Uint8ClampedArray, offset: number, target: number[], tolerance: number) {
+function toHex(channels: number[]) {
+  return `#${channels.map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, '0')).join('')}`
+}
+
+function matchesColor(data: Uint8ClampedArray, offset: number, target: number[], tolerance: number) {
   return Math.abs(data[offset] - target[0]) <= tolerance && Math.abs(data[offset + 1] - target[1]) <= tolerance && Math.abs(data[offset + 2] - target[2]) <= tolerance && Math.abs(data[offset + 3] - target[3]) <= tolerance
 }
 
@@ -43,7 +47,9 @@ function applyFill(ctx: CanvasRenderingContext2D, x: number, y: number, color: s
   if (total > 8_000_000) return -1
   const image = ctx.getImageData(0, 0, width, height)
   const data = image.data
-  const start = (Math.floor(y) * width + Math.floor(x)) * 4
+  const startX = Math.max(0, Math.min(width - 1, Math.floor(x)))
+  const startY = Math.max(0, Math.min(height - 1, Math.floor(y)))
+  const start = (startY * width + startX) * 4
   const target = [data[start], data[start + 1], data[start + 2], data[start + 3]]
   const rgb = parseHex(color)
   if (!rgb) return 0
@@ -51,18 +57,18 @@ function applyFill(ctx: CanvasRenderingContext2D, x: number, y: number, color: s
   if (target.every((channel, index) => channel === replacement[index])) return 0
   const visited = new Uint8Array(Math.ceil(total / 8))
   const queue = new Uint32Array(total)
-  const marked = (pixel: number) => (visited[pixel >> 3] & (1 << (pixel & 7))) !== 0
-  const mark = (pixel: number) => { visited[pixel >> 3] |= 1 << (pixel & 7) }
+  const isVisited = (pixel: number) => (visited[pixel >> 3] & (1 << (pixel & 7))) !== 0
+  const visit = (pixel: number) => { visited[pixel >> 3] |= 1 << (pixel & 7) }
   let head = 0
   let tail = 0
   const enqueue = (pixel: number) => {
     const offset = pixel * 4
-    if (marked(pixel) || !colorDistanceMatches(data, offset, target, tolerance)) return
-    mark(pixel)
+    if (isVisited(pixel) || !matchesColor(data, offset, target, tolerance)) return
+    visit(pixel)
     data[offset] = replacement[0]; data[offset + 1] = replacement[1]; data[offset + 2] = replacement[2]; data[offset + 3] = 255
     queue[tail++] = pixel
   }
-  enqueue(Math.floor(y) * width + Math.floor(x))
+  enqueue(startY * width + startX)
   while (head < tail) {
     const pixel = queue[head++]
     const px = pixel % width
@@ -84,7 +90,7 @@ function applyReplacement(ctx: CanvasRenderingContext2D, from: string, to: strin
   const target = [...targetRgb, 255]
   let count = 0
   for (let offset = 0; offset < data.length; offset += 4) {
-    if (!colorDistanceMatches(data, offset, target, tolerance)) continue
+    if (!matchesColor(data, offset, target, tolerance)) continue
     if (replacementRgb) {
       data[offset] = replacementRgb[0]; data[offset + 1] = replacementRgb[1]; data[offset + 2] = replacementRgb[2]; data[offset + 3] = 255
     } else {
@@ -113,10 +119,14 @@ function UrArtStudio() {
   const [size, setSize] = useState(4)
   const [canvasWidth, setCanvasWidth] = useState(1152)
   const [canvasHeight, setCanvasHeight] = useState(1000)
-  const [erase, setErase] = useState(false)
-  const [strokes, setStrokes] = useState<Stroke[]>([])
-  const [history, setHistory] = useState<Stroke[][]>([])
-  const [redoStack, setRedoStack] = useState<Stroke[][]>([])
+  const [tool, setTool] = useState<'draw' | 'erase' | 'fill'>('draw')
+  const [fromColor, setFromColor] = useState('#5c8df6')
+  const [toColor, setToColor] = useState('#58d68d')
+  const [replaceMask, setReplaceMask] = useState(false)
+  const [tolerance, setTolerance] = useState(0)
+  const [strokes, setStrokes] = useState<CanvasAction[]>([])
+  const [history, setHistory] = useState<CanvasAction[][]>([])
+  const [redoStack, setRedoStack] = useState<CanvasAction[][]>([])
   const [drawing, setDrawing] = useState(false)
   const [status, setStatus] = useState('Canvas ready')
   const [exportName, setExportName] = useState('ur-art')
@@ -166,37 +176,52 @@ function UrArtStudio() {
     }
   }
 
-  const redraw = (nextStrokes: Stroke[]) => {
+  const redraw = (nextStrokes: CanvasAction[]) => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.fillStyle = '#f7f3ff'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
     ctx.imageSmoothingEnabled = false
-    for (const stroke of nextStrokes) {
-      if (!stroke.points.length) continue
+    for (const action of nextStrokes) {
+      if ('kind' in action) {
+        if (action.kind === 'fill') applyFill(ctx, action.x, action.y, action.color, action.tolerance)
+        else applyReplacement(ctx, action.from, action.to, action.tolerance)
+        continue
+      }
+      if (!action.points.length) continue
       ctx.save()
-      ctx.globalCompositeOperation = stroke.erase ? 'destination-out' : 'source-over'
-      ctx.strokeStyle = stroke.color
-      ctx.lineWidth = stroke.size
+      ctx.globalCompositeOperation = action.erase ? 'destination-out' : 'source-over'
+      ctx.strokeStyle = action.color
+      ctx.lineWidth = action.size
       ctx.lineCap = 'square'
       ctx.lineJoin = 'miter'
       ctx.beginPath()
-      ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
-      for (const point of stroke.points.slice(1)) ctx.lineTo(point.x, point.y)
+      ctx.moveTo(action.points[0].x, action.points[0].y)
+      for (const point of action.points.slice(1)) ctx.lineTo(point.x, point.y)
       ctx.stroke()
       ctx.restore()
     }
   }
 
   const startDrawing = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const point = getPoint(event)
+    if (tool === 'fill') {
+      const ctx = canvasRef.current?.getContext('2d')
+      if (!ctx) return
+      const count = applyFill(ctx, point.x, point.y, color, tolerance)
+      if (count < 0) { setStatus('Bucket fill is limited to canvases below 8 million pixels'); return }
+      if (!count) { setStatus('No connected pixels to fill'); return }
+      const action: CanvasAction = { kind: 'fill', x: point.x, y: point.y, color, tolerance }
+      setHistory((current) => [...current, strokes]); setRedoStack([]); setStrokes((current) => [...current, action])
+      setStatus(`Filled ${count.toLocaleString()} connected pixels`)
+      return
+    }
     event.currentTarget.setPointerCapture(event.pointerId)
     setHistory((current) => [...current, strokes])
     setRedoStack([])
     setDrawing(true)
-    const nextStroke = { points: [getPoint(event)], color, size, erase }
+    const nextStroke: Stroke = { points: [point], color, size, erase: tool === 'erase' }
     setStrokes((current) => {
       const next = [...current, nextStroke]
       redraw(next)
@@ -218,7 +243,26 @@ function UrArtStudio() {
   const finishDrawing = () => {
     if (!drawing) return
     setDrawing(false)
-    setStatus(erase ? 'Erased a mark' : 'Added a mark')
+    setStatus(tool === 'erase' ? 'Erased a mark' : 'Added a mark')
+  }
+
+  const replaceColors = () => {
+    if (!parseHex(fromColor) || (!replaceMask && !parseHex(toColor))) { setStatus('Enter a valid hex value, for example #000000'); return }
+    const ctx = canvasRef.current?.getContext('2d')
+    if (!ctx) return
+    const to = replaceMask ? null : toColor
+    const count = applyReplacement(ctx, fromColor, to, tolerance)
+    if (!count) { setStatus(`No pixels match ${fromColor}`); return }
+    const action: CanvasAction = { kind: 'replace', from: fromColor, to, tolerance }
+    setHistory((current) => [...current, strokes]); setRedoStack([]); setStrokes((current) => [...current, action])
+    setStatus(`Replaced ${count.toLocaleString()} pixels`)
+  }
+
+  const updateColorChannel = (index: number, value: number) => {
+    const channels = colorChannels(color)
+    channels[index] = value
+    setColor(toHex(channels))
+    setTool('draw')
   }
 
   const undo = () => {
@@ -301,14 +345,13 @@ function UrArtStudio() {
     const scaleY = height / canvasHeight
     const maxBrushSize = Math.max(1, Math.min(8, width, height))
     const nextSize = Math.min(size, maxBrushSize)
-    const nextStrokes = strokes.map((stroke) => ({
-      ...stroke,
-      size: Math.min(maxBrushSize, Math.max(1, stroke.size * Math.min(scaleX, scaleY))),
-      points: stroke.points.map((point) => ({
+    const nextStrokes = strokes.map((stroke) => {
+      if ('kind' in stroke) return stroke
+      return { ...stroke, size: Math.min(maxBrushSize, Math.max(1, stroke.size * Math.min(scaleX, scaleY))), points: stroke.points.map((point) => ({
         x: Math.max(0, Math.min(width - 1, point.x * scaleX)),
         y: Math.max(0, Math.min(height - 1, point.y * scaleY)),
-      })),
-    }))
+      })) }
+    })
     const canvas = canvasRef.current
     if (canvas) {
       canvas.width = width
@@ -356,8 +399,9 @@ function UrArtStudio() {
       <div className="mx-auto grid max-w-[1440px] gap-6 px-5 py-6 lg:grid-cols-[240px_minmax(0,1fr)_240px] lg:px-10 lg:py-8">
         <aside className="order-2 space-y-4 lg:order-1">
           <ToolPanel title="Tools" eyebrow="01 / mark">
-            <button onClick={() => setErase(false)} className={`tool-button ${!erase ? 'tool-button-active' : ''}`}><MousePointer2 className="size-4" /><span>Draw</span><kbd>B</kbd></button>
-            <button onClick={() => setErase(true)} className={`tool-button ${erase ? 'tool-button-active' : ''}`}><Eraser className="size-4" /><span>Eraser</span><kbd>E</kbd></button>
+            <button onClick={() => setTool('draw')} className={`tool-button ${tool === 'draw' ? 'tool-button-active' : ''}`}><MousePointer2 className="size-4" /><span>Draw</span><kbd>B</kbd></button>
+            <button onClick={() => setTool('erase')} className={`tool-button ${tool === 'erase' ? 'tool-button-active' : ''}`}><Eraser className="size-4" /><span>Eraser</span><kbd>E</kbd></button>
+            <button onClick={() => setTool('fill')} className={`tool-button ${tool === 'fill' ? 'tool-button-active' : ''}`}><PaintBucket className="size-4" /><span>Bucket fill</span><kbd>G</kbd></button>
           </ToolPanel>
           <ToolPanel title="Pixel size" eyebrow="02 / resolution">
             <div className="grid grid-cols-4 gap-2">
@@ -396,16 +440,25 @@ function UrArtStudio() {
             <div className="canvas-frame aspect-square w-full overflow-hidden rounded-xl border border-border/80 bg-[#f7f3ff] sm:aspect-[1.2/1] lg:aspect-[1.15/1]">
               <canvas ref={canvasRef} width={canvasWidth} height={canvasHeight} className="size-full touch-none cursor-crosshair" onPointerDown={startDrawing} onPointerMove={draw} onPointerUp={finishDrawing} onPointerCancel={finishDrawing} />
             </div>
-            <div className="flex items-center justify-between px-2 pt-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground"><span>{canvasWidth} × {canvasHeight} px</span><span>pressure ready · {erase ? 'erase mode' : 'draw mode'}</span></div>
+            <div className="flex items-center justify-between px-2 pt-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground"><span>{canvasWidth} × {canvasHeight} px</span><span>pressure ready · {tool} mode</span></div>
           </div>
         </section>
 
         <aside className="order-3 space-y-4">
           <ToolPanel title="Palette" eyebrow="05 / color">
             <div className="grid grid-cols-6 gap-2">
-              {palette.map((swatch) => <button key={swatch} aria-label={`Choose ${swatch}`} onClick={() => { setColor(swatch); setErase(false) }} className={`palette-swatch ${color === swatch && !erase ? 'palette-swatch-active' : ''}`} style={{ backgroundColor: swatch }} />)}
+              {palette.map((swatch) => <button key={swatch} aria-label={`Choose ${swatch}`} onClick={() => { setColor(swatch); setTool('draw') }} className={`palette-swatch ${color === swatch && tool === 'draw' ? 'palette-swatch-active' : ''}`} style={{ backgroundColor: swatch }} />)}
             </div>
-            <div className="mt-4 flex items-center gap-3 rounded-lg border border-border bg-secondary/50 px-3 py-2"><span className="size-7 rounded-md border border-border" style={{ backgroundColor: erase ? '#f7f3ff' : color }} /><div className="min-w-0"><p className="text-xs font-medium">{erase ? 'Eraser' : 'Active color'}</p><p className="font-mono text-[10px] uppercase text-muted-foreground">{erase ? 'transparent' : color}</p></div></div>
+            <div className="mt-4 flex items-center gap-3 rounded-lg border border-border bg-secondary/50 px-3 py-2"><span className="size-7 rounded-md border border-border" style={{ backgroundColor: color }} /><div className="min-w-0"><p className="text-xs font-medium">Active color</p><p className="font-mono text-[10px] uppercase text-muted-foreground">{color}</p></div></div>
+            <label className="mt-3 block space-y-1 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Hex color<input aria-label="Active color hex" value={color} onChange={(event) => setColor(event.target.value)} onBlur={() => { if (parseHex(color)) setColor(toHex(colorChannels(color))); else setStatus('Use #RGB or #RRGGBB') }} className="w-full rounded-lg border border-border bg-secondary/60 px-2.5 py-2 text-sm font-sans normal-case text-foreground outline-none focus:border-primary" /></label>
+            {(['Red', 'Green', 'Blue'] as const).map((name, index) => <label key={name} className="mt-2 grid grid-cols-[32px_1fr_34px] items-center gap-2 text-[10px] text-muted-foreground"><span>{name}</span><input aria-label={`${name} intensity`} type="range" min="0" max="255" value={colorChannels(color)[index]} onChange={(event) => updateColorChannel(index, Number(event.target.value))} className="accent-primary" /><span className="font-mono">{colorChannels(color)[index]}</span></label>)}
+          </ToolPanel>
+          <ToolPanel title="Replace color" eyebrow="06 / recolor">
+            <div className="grid grid-cols-2 gap-2"><label className="space-y-1 text-[10px] font-mono uppercase text-muted-foreground">From<input value={fromColor} onChange={(event) => setFromColor(event.target.value)} onBlur={() => { if (parseHex(fromColor)) setFromColor(toHex(colorChannels(fromColor))) }} className="w-full rounded-lg border border-border bg-secondary/60 px-2 py-2 text-sm font-sans text-foreground" /></label><label className="space-y-1 text-[10px] font-mono uppercase text-muted-foreground">To<input value={toColor} disabled={replaceMask} onChange={(event) => setToColor(event.target.value)} onBlur={() => { if (parseHex(toColor)) setToColor(toHex(colorChannels(toColor))) }} className="w-full rounded-lg border border-border bg-secondary/60 px-2 py-2 text-sm font-sans text-foreground disabled:opacity-40" /></label></div>
+            <div className="mt-2 grid grid-cols-2 gap-2"><label className="flex items-center gap-2 text-xs normal-case tracking-normal"><input type="color" value={parseHex(fromColor) ? toHex(colorChannels(fromColor)) : '#000000'} onChange={(event) => setFromColor(event.target.value)} className="size-8 rounded border border-border bg-transparent p-0.5" />From RGB</label><label className="flex items-center gap-2 text-xs normal-case tracking-normal"><input type="color" value={parseHex(toColor) ? toHex(colorChannels(toColor)) : '#ffffff'} disabled={replaceMask} onChange={(event) => setToColor(event.target.value)} className="size-8 rounded border border-border bg-transparent p-0.5 disabled:opacity-40" />To RGB</label></div>
+            <label className="mt-3 flex items-center gap-2 text-xs normal-case tracking-normal"><input type="checkbox" checked={replaceMask} onChange={(event) => setReplaceMask(event.target.checked)} />Mask (replace with transparency)</label>
+            <label className="mt-3 grid grid-cols-[1fr_auto] items-center gap-2 text-[10px] font-mono uppercase text-muted-foreground">Tolerance <span>{tolerance} / 200</span><input className="col-span-2 accent-primary" type="range" min="0" max="200" value={tolerance} onChange={(event) => setTolerance(Number(event.target.value))} /></label>
+            <button onClick={replaceColors} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-xs font-medium text-primary-foreground transition hover:brightness-110 active:scale-[.98]"><Replace className="size-4" />Replace matching pixels</button>
           </ToolPanel>
           <ToolPanel title="Export" eyebrow="06 / save">
             <label className="mb-2 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground" htmlFor="export-name">File name</label>
@@ -476,19 +529,24 @@ function GalleryPreview({ drawing }: { drawing: PublicDrawingsRow }) {
     ctx.fillStyle = '#f7f3ff'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
     try {
-      const strokes = JSON.parse(drawing.canvasData) as Stroke[]
+      const strokes = JSON.parse(drawing.canvasData) as CanvasAction[]
       ctx.imageSmoothingEnabled = false
-      for (const stroke of strokes) {
-        if (!stroke.points.length) continue
+      for (const action of strokes) {
+        if ('kind' in action) {
+          if (action.kind === 'fill') applyFill(ctx, action.x, action.y, action.color, action.tolerance)
+          else applyReplacement(ctx, action.from, action.to, action.tolerance)
+          continue
+        }
+        if (!action.points.length) continue
         ctx.save()
-        ctx.globalCompositeOperation = stroke.erase ? 'destination-out' : 'source-over'
-        ctx.strokeStyle = stroke.color
-        ctx.lineWidth = stroke.size
+        ctx.globalCompositeOperation = action.erase ? 'destination-out' : 'source-over'
+        ctx.strokeStyle = action.color
+        ctx.lineWidth = action.size
         ctx.lineCap = 'square'
         ctx.lineJoin = 'miter'
         ctx.beginPath()
-        ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
-        for (const point of stroke.points.slice(1)) ctx.lineTo(point.x, point.y)
+        ctx.moveTo(action.points[0].x, action.points[0].y)
+        for (const point of action.points.slice(1)) ctx.lineTo(point.x, point.y)
         ctx.stroke()
         ctx.restore()
       }
