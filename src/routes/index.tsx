@@ -148,7 +148,6 @@ function UrArtStudio() {
   const drawingsTable = blink.db.table<PublicDrawingsRow>('public_drawings')
 
   const loadGallery = useCallback(async () => {
-    setGalleryLoading(true)
     try {
       const rows = await drawingsTable.list({
         where: { isPublic: '1' },
@@ -164,7 +163,8 @@ function UrArtStudio() {
   }, [drawingsTable])
 
   useEffect(() => {
-    void loadGallery()
+    const timer = window.setTimeout(() => { void loadGallery() }, 0)
+    return () => window.clearTimeout(timer)
   }, [loadGallery])
 
   const getPoint = (event: ReactPointerEvent<HTMLCanvasElement>): Point => {
@@ -234,6 +234,7 @@ function UrArtStudio() {
     setStrokes((current) => {
       const updated = [...current]
       const active = updated[updated.length - 1]
+      if ('kind' in active) return current
       active.points = [...active.points, getPoint(event)]
       redraw(updated)
       return updated
