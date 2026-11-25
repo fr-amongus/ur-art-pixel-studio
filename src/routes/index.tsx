@@ -18,9 +18,9 @@ const canvasPresets = [
 ]
 
 type Point = { x: number; y: number }
-
-type Stroke = { points: Point[]; color: string; size: number; erase: boolean }
-type CanvasAction = Stroke | { kind: 'fill'; x: number; y: number; color: string; tolerance: number } | { kind: 'replace'; from: string; to: string | null; tolerance: number }
+type DrawPoint = Point & { pressure: number }
+type Stroke = { points: DrawPoint[]; color: string; size: number; erase: boolean }
+type CanvasAction = { points: DrawPoint[]; color: string; size: number; erase: boolean } | { kind: 'fill'; x: number; y: number; color: string; tolerance: number } | { kind: 'replace'; from: string; to: string | null; tolerance: number }
 
 function parseHex(value: string): [number, number, number] | null {
   const raw = value.trim().replace(/^#/, '')
@@ -127,7 +127,11 @@ function UrArtStudio() {
   const [strokes, setStrokes] = useState<CanvasAction[]>([])
   const [history, setHistory] = useState<CanvasAction[][]>([])
   const [redoStack, setRedoStack] = useState<CanvasAction[][]>([])
-  const [drawing, setDrawing] = useState(false)
+  const drawingRef = useRef(false)
+  const activeStrokeRef = useRef<Stroke | null>(null)
+  const activePointsRef = useRef<DrawPoint[]>([])
+  const lastPointRef = useRef<DrawPoint | null>(null)
+  const rafRef = useRef<number | null>(null)
   const [status, setStatus] = useState('Canvas ready')
   const [exportName, setExportName] = useState('ur-art')
   const [exportFormat, setExportFormat] = useState<'png' | 'jpeg' | 'webp'>('png')
@@ -167,13 +171,35 @@ function UrArtStudio() {
     return () => window.clearTimeout(timer)
   }, [loadGallery])
 
-  const getPoint = (event: ReactPointerEvent<HTMLCanvasElement>): Point => {
+  const getPoint = (event: PointerEvent | ReactPointerEvent<HTMLCanvasElement>): DrawPoint => {
     const canvas = canvasRef.current!
     const rect = canvas.getBoundingClientRect()
     return {
-      x: (event.clientX - rect.left) * (canvas.width / rect.width),
-      y: (event.clientY - rect.top) * (canvas.height / rect.height),
+      x: Math.max(0, Math.min(canvas.width - 1, Math.floor((event.clientX - rect.left) * (canvas.width / rect.width)))),
+      y: Math.max(0, Math.min(canvas.height - 1, Math.floor((event.clientY - rect.top) * (canvas.height / rect.height)))),
+      pressure: event.pointerType === 'mouse' ? 0.5 : Math.max(0.1, event.pressure || 0.5),
     }
+  }
+
+  const drawSegment = (ctx: CanvasRenderingContext2D, from: DrawPoint, to: DrawPoint, stroke: Stroke) => {
+    ctx.save()
+    ctx.globalCompositeOperation = stroke.erase ? 'destination-out' : 'source-over'
+    ctx.strokeStyle = stroke.color
+    ctx.fillStyle = stroke.color
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.lineWidth = Math.max(1, Math.round(stroke.size * ((from.pressure + to.pressure) / 2)))
+    ctx.beginPath()
+    ctx.moveTo(from.x + 0.5, from.y + 0.5)
+    ctx.lineTo(to.x + 0.5, to.y + 0.5)
+    ctx.stroke()
+    if (from.x === to.x && from.y === to.y) {
+      const diameter = Math.max(1, Math.round(stroke.size * to.pressure))
+      ctx.beginPath()
+      ctx.arc(to.x + 0.5, to.y + 0.5, diameter / 2, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.restore()
   }
 
   const redraw = (nextStrokes: CanvasAction[]) => {
@@ -194,12 +220,25 @@ function UrArtStudio() {
       ctx.globalCompositeOperation = action.erase ? 'destination-out' : 'source-over'
       ctx.strokeStyle = action.color
       ctx.lineWidth = action.size
-      ctx.lineCap = 'square'
-      ctx.lineJoin = 'miter'
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
       ctx.beginPath()
-      ctx.moveTo(action.points[0].x, action.points[0].y)
-      for (const point of action.points.slice(1)) ctx.lineTo(point.x, point.y)
+      const first = action.points[0]
+      ctx.lineWidth = Math.max(1, Math.round(action.size * (first.pressure ?? 0.5)))
+      ctx.moveTo(first.x + 0.5, first.y + 0.5)
+      for (let index = 1; index < action.points.length; index++) {
+        const point = action.points[index]
+        ctx.lineWidth = Math.max(1, Math.round(action.size * (((point.pressure ?? 0.5) + (action.points[index - 1]?.pressure ?? 0.5)) / 2)))
+        ctx.lineTo(point.x + 0.5, point.y + 0.5)
+      }
       ctx.stroke()
+      if (action.points.length === 1) {
+        const diameter = Math.max(1, Math.round(action.size * (first.pressure ?? 0.5)))
+        ctx.fillStyle = action.color
+        ctx.beginPath()
+        ctx.arc(first.x + 0.5, first.y + 0.5, diameter / 2, 0, Math.PI * 2)
+        ctx.fill()
+      }
       ctx.restore()
     }
   }
@@ -220,30 +259,57 @@ function UrArtStudio() {
     event.currentTarget.setPointerCapture(event.pointerId)
     setHistory((current) => [...current, strokes])
     setRedoStack([])
-    setDrawing(true)
-    const nextStroke: Stroke = { points: [point], color, size, erase: tool === 'erase' }
+    const first = getPoint(event)
+    const nextStroke: Stroke = { points: [first], color, size, erase: tool === 'erase' }
+    activeStrokeRef.current = nextStroke
+    const ctx = event.currentTarget.getContext('2d')
+    if (ctx) drawSegment(ctx, first, first, nextStroke)
+    activePointsRef.current = [first]
+    lastPointRef.current = first
+    drawingRef.current = true
     setStrokes((current) => {
-      const next = [...current, nextStroke]
-      redraw(next)
-      return next
+      return [...current, nextStroke]
     })
   }
 
   const draw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!drawing) return
-    setStrokes((current) => {
-      const updated = [...current]
-      const active = updated[updated.length - 1]
-      if ('kind' in active) return current
-      active.points = [...active.points, getPoint(event)]
-      redraw(updated)
-      return updated
-    })
+    if (!drawingRef.current) return
+    const nativeEvent = event.nativeEvent
+    const samples = typeof nativeEvent.getCoalescedEvents === 'function' ? nativeEvent.getCoalescedEvents() : [nativeEvent]
+    const ctx = canvasRef.current?.getContext('2d')
+    if (!ctx) return
+    const currentStroke = activeStrokeRef.current
+    if (!currentStroke) return
+    for (const sample of samples) {
+      const nextPoint = getPoint(sample)
+      const previous = lastPointRef.current
+      if (!previous) continue
+      drawSegment(ctx, previous, nextPoint, currentStroke)
+      activePointsRef.current.push(nextPoint)
+      lastPointRef.current = nextPoint
+    }
+    if (rafRef.current === null) {
+      rafRef.current = window.requestAnimationFrame(() => { rafRef.current = null })
+    }
   }
 
-  const finishDrawing = () => {
-    if (!drawing) return
-    setDrawing(false)
+  const finishDrawing = (event?: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return
+    if (event && lastPointRef.current) {
+      const finalPoint = getPoint(event)
+      const ctx = canvasRef.current?.getContext('2d')
+      const currentStroke = activeStrokeRef.current
+      if (ctx && currentStroke) drawSegment(ctx, lastPointRef.current, finalPoint, currentStroke)
+      activePointsRef.current.push(finalPoint)
+    }
+    drawingRef.current = false
+    if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current)
+    rafRef.current = null
+    const points = activePointsRef.current
+    if (activeStrokeRef.current) setStrokes((current) => [...current, { ...activeStrokeRef.current!, points }])
+    activeStrokeRef.current = null
+    activePointsRef.current = []
+    lastPointRef.current = null
     setStatus(tool === 'erase' ? 'Erased a mark' : 'Added a mark')
   }
 
@@ -351,6 +417,7 @@ function UrArtStudio() {
       return { ...stroke, size: Math.min(maxBrushSize, Math.max(1, stroke.size * Math.min(scaleX, scaleY))), points: stroke.points.map((point) => ({
         x: Math.max(0, Math.min(width - 1, point.x * scaleX)),
         y: Math.max(0, Math.min(height - 1, point.y * scaleY)),
+        pressure: point.pressure ?? 0.5,
       })) }
     })
     const canvas = canvasRef.current
