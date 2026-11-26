@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { Download, Eraser, Trash2, Undo2, Redo2, MousePointer2, Globe2, LogIn, RefreshCw, PaintBucket, Replace } from 'lucide-react'
 import { blink } from '@/blink/client'
+import { BlinkClientBoundary } from '@/components/BlinkClientBoundary'
 import type { PublicDrawingsRow } from '@/lib/db-types'
 
 const palette = [
@@ -109,7 +110,7 @@ export const Route = createFileRoute('/')({
       { name: 'description', content: 'A tactile pixel-art studio for quick sketches, notes, and tiny worlds.' },
     ],
   }),
-  component: UrArtStudio,
+  component: () => <BlinkClientBoundary fallback={<div className="min-h-dvh bg-background" />}><UrArtStudio /></BlinkClientBoundary>,
 })
 
 function UrArtStudio() {
@@ -132,6 +133,7 @@ function UrArtStudio() {
   const activePointsRef = useRef<DrawPoint[]>([])
   const lastPointRef = useRef<DrawPoint | null>(null)
   const rafRef = useRef<number | null>(null)
+  const strokesRef = useRef<CanvasAction[]>([])
   const [status, setStatus] = useState('Canvas ready')
   const [exportName, setExportName] = useState('ur-art')
   const [exportFormat, setExportFormat] = useState<'png' | 'jpeg' | 'webp'>('png')
@@ -171,6 +173,8 @@ function UrArtStudio() {
     return () => window.clearTimeout(timer)
   }, [loadGallery])
 
+  useEffect(() => { strokesRef.current = strokes }, [strokes])
+
   const getPoint = (event: PointerEvent | ReactPointerEvent<HTMLCanvasElement>): DrawPoint => {
     const canvas = canvasRef.current!
     const rect = canvas.getBoundingClientRect()
@@ -186,18 +190,12 @@ function UrArtStudio() {
     ctx.globalCompositeOperation = stroke.erase ? 'destination-out' : 'source-over'
     ctx.strokeStyle = stroke.color
     ctx.fillStyle = stroke.color
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.lineWidth = Math.max(1, Math.round(stroke.size * ((from.pressure + to.pressure) / 2)))
-    ctx.beginPath()
-    ctx.moveTo(from.x + 0.5, from.y + 0.5)
-    ctx.lineTo(to.x + 0.5, to.y + 0.5)
-    ctx.stroke()
-    if (from.x === to.x && from.y === to.y) {
-      const diameter = Math.max(1, Math.round(stroke.size * to.pressure))
-      ctx.beginPath()
-      ctx.arc(to.x + 0.5, to.y + 0.5, diameter / 2, 0, Math.PI * 2)
-      ctx.fill()
+    const diameter = Math.max(1, Math.round(stroke.size * ((from.pressure + to.pressure) / 2)))
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    const steps = Math.max(Math.abs(dx), Math.abs(dy), 1)
+    for (let step = 0; step <= steps; step++) {
+      ctx.fillRect(Math.round(from.x + dx * step / steps), Math.round(from.y + dy * step / steps), diameter, diameter)
     }
     ctx.restore()
   }
@@ -267,9 +265,7 @@ function UrArtStudio() {
     activePointsRef.current = [first]
     lastPointRef.current = first
     drawingRef.current = true
-    setStrokes((current) => {
-      return [...current, nextStroke]
-    })
+    setStrokes((current) => { const next = [...current, nextStroke]; strokesRef.current = next; return next })
   }
 
   const draw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -306,7 +302,7 @@ function UrArtStudio() {
     if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current)
     rafRef.current = null
     const points = activePointsRef.current
-    if (activeStrokeRef.current) setStrokes((current) => [...current, { ...activeStrokeRef.current!, points }])
+    if (activeStrokeRef.current) setStrokes((current) => { const next = [...current.slice(0, -1), { ...activeStrokeRef.current!, points }]; strokesRef.current = next; return next })
     activeStrokeRef.current = null
     activePointsRef.current = []
     lastPointRef.current = null
@@ -338,6 +334,7 @@ function UrArtStudio() {
     setRedoStack((current) => [...current, strokes])
     setHistory((current) => current.slice(0, -1))
     setStrokes(previous)
+    strokesRef.current = previous
     redraw(previous)
     setStatus('Undid last mark')
   }
@@ -348,6 +345,7 @@ function UrArtStudio() {
     setHistory((current) => [...current, strokes])
     setRedoStack((current) => current.slice(0, -1))
     setStrokes(next)
+    strokesRef.current = next
     redraw(next)
     setStatus('Redid last mark')
   }
@@ -357,6 +355,7 @@ function UrArtStudio() {
     setHistory((current) => [...current, strokes])
     setRedoStack([])
     setStrokes([])
+    strokesRef.current = []
     redraw([])
     setStatus('Canvas cleared')
   }
